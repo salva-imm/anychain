@@ -9,3 +9,5 @@ edition = "2021"
 actix-web = { version = "4", default-features = false, features = ["macros"] }
 tokio = { version = "1", features = ["full"] }
 serde = { version = "1", features = ["derive"] }
+sha2 = "0.10"
+base16ct = { version = "0.1.1",  features = ["alloc"] }
