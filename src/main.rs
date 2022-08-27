@@ -1,20 +1,20 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use sha2::{Sha256, Digest};
-use std::sync::Mutex;
+use tokio::sync::RwLock;
 use actix_web::{web, App, HttpServer, Responder, Result, web::{Data}};
 use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Hash)]
-struct Block<'a>{
+struct Block{
     index: u32,
-    message: &'a str,
-    previous_hash: &'a str,
+    message: String,
+    previous_hash: String,
     nonce: u64,
     timestamp: u32
 }
 // 00000d27548b48fb9948dec841504bb2dfe0ad4812f0f6c049f2cd02dada6dcd
-async fn proof_of_work<'a>(last_block: &Block<'a>) -> u64 {
+async fn proof_of_work(last_block: &Block) -> u64 {
     let mut nonce: u64 = 1;
     let mut check_proof = false;
 
@@ -36,27 +36,32 @@ async fn proof_of_work<'a>(last_block: &Block<'a>) -> u64 {
     nonce
 }
 
-fn string_to_str(s: String) -> &'static str {
+
+fn _string_to_str(s: String) -> &'static str {
   Box::leak(s.into_boxed_str())
 }
 
-async fn mine_block<'a>(chain: Data<Mutex<Vec<Block<'a>>>>) -> Result<impl Responder + 'static> {
-    let mut t_chain = chain.lock().unwrap();
+async fn mine_block(chain: Data<RwLock<Vec<Block>>>) -> Result<impl Responder> {
+    let t_chain = chain.read().await;
+
     let len = t_chain.len();
-    let message = string_to_str(format!("newly mined block {}", (1 + len).to_string()));
+
     let nonce = proof_of_work(t_chain.last().unwrap()).await;
+
     let mut d_hasher = DefaultHasher::new();
     t_chain.last().unwrap().hash(&mut d_hasher);
     let mut hasher = Sha256::new();
+
     hasher.update(d_hasher.finish().to_string().as_bytes());
     let hash_operation = hasher.finalize();
     let hash_digest = base16ct::lower::encode_string(&hash_operation);
-    println!("{}", hash_digest);
+    drop(t_chain);
+    let mut t_chain = chain.write().await;
 
     t_chain.push(Block{
         index: 1 + len as u32,
-        message: message,
-        previous_hash: string_to_str(hash_digest),
+        message: format!("newly mined block {}", (1 + len)),
+        previous_hash: hash_digest,
         nonce: nonce,
         timestamp: 134465
     });
@@ -64,29 +69,30 @@ async fn mine_block<'a>(chain: Data<Mutex<Vec<Block<'a>>>>) -> Result<impl Respo
 }
 
 
-async fn display_chain<'a>(chain: Data<Mutex<Vec<Block<'a>>>>) -> Result<impl Responder + 'a> {
-    let t_chain = chain.lock().unwrap();
+async fn display_chain(chain: Data<RwLock<Vec<Block>>>) -> Result<impl Responder> {
+    let t_chain = chain.read().await;
     Ok(web::Json(t_chain.to_vec()))
 }
 
 
-async fn valid<'a>(_chain: Data<Mutex<Vec<Block<'a>>>>) -> Result<impl Responder> {
+async fn valid(_chain: Data<RwLock<Vec<Block>>>) -> Result<impl Responder> {
     Ok(web::Json({}))
 }
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     println!("Starting node on port 8000 ...");
-    let chain: Data<Mutex<Vec<Block>>> = Data::new(Mutex::new(vec![Block{
+
+    let chain: Data<RwLock<Vec<Block>>> = Data::new(RwLock::new(vec![Block{
         index: 1,
-        message: "Genesis block",
-        previous_hash: "0",
+        message: "Genesis block".to_string(),
+        previous_hash: "0".to_string(),
         nonce: 1,
         timestamp: 134465
     }]));
     HttpServer::new(move || {
         App::new()
-            .app_data(Data::clone(&chain))
+            .app_data(chain.clone())
             .route("/get_chain", web::get().to(display_chain))
             .route("/mine_block", web::get().to(mine_block))
             .route("/valid", web::get().to(valid))
