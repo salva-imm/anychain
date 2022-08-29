@@ -17,6 +17,7 @@ struct Block<'a>{
 async fn proof_of_work<'a>(last_block: &Block<'a>) -> u64 {
     let mut nonce: u64 = 1;
     let mut check_proof = false;
+    // TODO: make it parallel / future plan
 
     while !check_proof {
         let calc_proof: String = format!("{}{}{}",
